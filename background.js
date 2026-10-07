@@ -295,14 +295,17 @@ async function dbgAttach(tabId) {
   registerDebuggerEvents();
   const dbg = chrome.debugger;
   if (!dbg || dbgTabs.has(tabId)) return;
+  // Mark the tab before awaiting: a popup triggers both tabs.onCreated and onCreatedNavigationTarget,
+  // and a second concurrent attach would fail with "Another debugger is already attached".
+  dbgTabs.add(tabId);
   attachedAt.set(tabId, Date.now());
   try {
     await dbg.attach({ tabId }, '1.3');
   } catch (e) {
+    dbgTabs.delete(tabId);
     record(tabId, { t: Date.now(), src: 'cdp', type: 'cdp:attachError', data: { message: String((e && e.message) || e) } });
     return;
   }
-  dbgTabs.add(tabId);
   const send = (m, params) => dbg.sendCommand({ tabId }, m, params).catch(() => {});
   await Promise.all([send('Log.enable'), send('Runtime.enable'), send('Page.enable'), send('Network.enable')]);
   await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });

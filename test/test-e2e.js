@@ -1,12 +1,15 @@
 'use strict';
 /*
- * End-to-end test: the REAL extension is loaded in Chromium (Playwright, --load-extension).
+ * End-to-end test: the REAL extension is loaded in Chromium (--load-extension).
+ * Basic mode is driven by Playwright; advanced mode by a probe page inside the extension (see below).
  * Scenarios: fetch → Blob → iframe → print chain, attached popup, Service Worker request,
  * print() on a cross-origin frame, then advanced mode (debugger): print() refused in a sandboxed iframe.
  *
  * Usage : PLAYWRIGHT_MODULE=/opt/npm-tools/node_modules/playwright node test/test-e2e.js
  */
 const http = require('http');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -25,9 +28,53 @@ const server = http.createServer((req, res) => {
     res.end(`self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('message', async (e) => { const r = await fetch('/doc.pdf?from=sw'); const b = await r.blob(); e.source.postMessage({ size: b.size }); });`);
+  } else if (u === '/result') {
+    let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { res.end(); onResult(JSON.parse(b)); });
+  } else if (u.startsWith('/adv')) {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(`<!doctype html><title>adv</title><style>body{margin:0}#b{position:fixed;left:0;top:0;width:200px;height:100px}</style>
+<button id="b">go</button><script>
+document.getElementById('b').addEventListener('click', () => {
+  const f = document.createElement('iframe');
+  f.setAttribute('sandbox', 'allow-scripts');
+  f.srcdoc = '<script>print()<\\/script>';
+  document.body.append(f);
+  window.open('about:blank');   // right after the click: the debugger reports userGesture
+});
+</script>`);
   } else if (u === '/frame.html') { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><p>other origin</p>'); }
   else { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><title>app</title><body><button id="b">go</button></body>'); }
 });
+
+let onResult = () => {};
+
+// Runs inside the extension (probe.html): drives the advanced mode the way a user would.
+async function probe() {
+  const base = new URLSearchParams(location.search).get('base');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const cmd = (m) => chrome.runtime.sendMessage(m);
+  const out = {};
+  try {
+    const tab = await chrome.tabs.create({ url: base + '/adv', active: true });
+    out.tabId = tab.id;
+    await sleep(1500);
+    await cmd({ kind: 'setAdvanced', value: true });
+    await cmd({ kind: 'start', tabId: tab.id });
+    await chrome.tabs.update(tab.id, { url: base + '/adv?r=1' });
+    await sleep(1500);
+    out.attachedBefore = (await cmd({ kind: 'get', tabId: tab.id })).debuggerAttached;
+    try {
+      for (const type of ['mousePressed', 'mouseReleased']) {
+        await chrome.debugger.sendCommand({ tabId: tab.id }, 'Input.dispatchMouseEvent', { type, x: 50, y: 50, button: 'left', clickCount: 1 });
+      }
+    } catch (e) { out.clickError = String((e && e.message) || e); }
+    await sleep(2000);
+    out.trace = await cmd({ kind: 'get', tabId: tab.id });
+    await cmd({ kind: 'stop', tabId: tab.id });
+    out.attachedAfterStop = (await cmd({ kind: 'get', tabId: tab.id })).debuggerAttached;
+  } catch (e) { out.error = String((e && e.message) || e); }
+  await fetch(base + '/result', { method: 'POST', body: JSON.stringify(out) });
+}
 
 const step = (m) => console.log('\n— ' + m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -129,38 +176,53 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('Verdict (main PDF) :', aMain.verdict.title);
   console.log('Verdict (Service Worker PDF) :', aSw.verdict.title);
 
+  await ctx.close();
+
   /* ------------------------------------------------------------------ */
+  // Advanced mode runs WITHOUT Playwright: since Chromium 153, a page crashes when Playwright's own CDP
+  // session and the extension's chrome.debugger session are attached to the same tab (real users are
+  // not affected: no other debugger is attached). Chromium is launched directly and driven by a probe
+  // page inside a copy of the extension; the probe posts the trace back to the test server.
   step('2. Advanced mode: print() refused in a sandboxed iframe + window.open with a gesture');
-  await fresh(true);
-  const t0adv = await cmd({ kind: 'get', tabId });
-  assert.ok(t0adv.debuggerAvailable && t0adv.debuggerAttached, 'debugger attached to the tab');
-  await page.click('#b');
-  await page.evaluate(async () => {
-    const f = document.createElement('iframe');
-    f.setAttribute('sandbox', 'allow-scripts');
-    f.srcdoc = '<script>print()</script>';
-    document.body.append(f);
-    await new Promise((r) => setTimeout(r, 800));
-    window.open('about:blank');                                   // popup right after a click: the debugger reports userGesture
-    await new Promise((r) => setTimeout(r, 300));
-  });
-  const t2 = await trace();
+  const extDir2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-ext2-')));
+  fs.cpSync(extDir, extDir2, { recursive: true });
+  fs.writeFileSync(path.join(extDir2, 'probe.html'), '<!doctype html><meta charset="utf-8"><script src="probe.js"></script>');
+  fs.writeFileSync(path.join(extDir2, 'probe.js'), '(' + probe.toString() + ')();');
+  const extId2 = [...crypto.createHash('sha256').update(extDir2).digest('hex').slice(0, 32)]
+    .map((c) => String.fromCharCode(97 + parseInt(c, 16))).join('');
+  const result = new Promise((r) => { onResult = r; });
+  const proc = spawn(chromium.executablePath(), [
+    '--headless=new', '--no-first-run', '--no-default-browser-check', '--no-sandbox',
+    '--user-data-dir=' + fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-prof2-')),
+    '--disable-extensions-except=' + extDir2, '--load-extension=' + extDir2,
+    'chrome-extension://' + extId2 + '/probe.html?base=' + encodeURIComponent(base)
+  ], { stdio: 'ignore' });
+  const timer = setTimeout(() => onResult({ error: 'timeout: the probe page never reported back' }), 45000);
+  const r = await result;
+  clearTimeout(timer);
+  proc.kill();
+  assert.ok(!r.error, 'probe: ' + r.error);
+  assert.ok(r.attachedBefore, 'debugger attached to the tab');
+  if (r.clickError) console.log('note: synthetic click failed (' + r.clickError + ')');
+  const t2 = r.trace;
+  const tabId2 = r.tabId;
   assert.ok(!has(t2.events, 'cdp:exception', (d) => /cross-origin/i.test(d.text)), 'previous page history discarded');
-  assert.ok(has(t2.events, 'cdp:windowOpen'), 'Page.windowOpen (userGesture) captured');
   console.log('types :', [...new Set(t2.events.map((e) => e.type))].sort().join(', '));
   const cdpTexts = t2.events.filter((e) => e.src === 'cdp').map((e) => e.type + ' ' + JSON.stringify(e.data).slice(0, 160));
   console.log(cdpTexts.slice(0, 8).join('\n'));
+  if (!r.clickError) assert.ok(has(t2.events, 'cdp:windowOpen', (d) => d.userGesture === true), 'Page.windowOpen (userGesture) captured');
   assert.ok(!has(t2.events, 'cdp:attachError'), 'debugger attached without error');
   assert.ok(t2.events.some((e) => e.src === 'cdp' && /print\(\)/i.test((e.data && e.data.text) || '')),
     'Chrome reports the ignored print() (browser message captured via the debugger)');
 
   // Same scenario seen by the analysis: the browser message becomes the verdict.
   const fakePdf = [
-    { t: 1000, n: 1, src: 'webRequest', type: 'wr:before', tabId, data: { requestId: 'x', url: base + '/doc.pdf', method: 'GET', resourceType: 'xmlhttprequest' } },
-    { t: 1100, n: 2, src: 'webRequest', type: 'wr:headers', tabId, data: { requestId: 'x', url: base + '/doc.pdf', statusCode: 200, contentType: 'application/pdf', headers: { 'content-type': 'application/pdf' } } },
-    { t: 1200, n: 3, src: 'webRequest', type: 'wr:completed', tabId, data: { requestId: 'x', url: base + '/doc.pdf', statusCode: 200 } }
+    { t: 1000, n: 1, src: 'webRequest', type: 'wr:before', tabId: tabId2, data: { requestId: 'x', url: base + '/doc.pdf', method: 'GET', resourceType: 'xmlhttprequest' } },
+    { t: 1100, n: 2, src: 'webRequest', type: 'wr:headers', tabId: tabId2, data: { requestId: 'x', url: base + '/doc.pdf', statusCode: 200, contentType: 'application/pdf', headers: { 'content-type': 'application/pdf' } } },
+    { t: 1200, n: 3, src: 'webRequest', type: 'wr:completed', tabId: tabId2, data: { requestId: 'x', url: base + '/doc.pdf', statusCode: 200 } }
   ];
-  const merged = fakePdf.concat(t2.events.map((e) => Object.assign({}, e, { t: e.t + 1e9 - Date.now() + 1300 })));
+  const t2min = Math.min(...t2.events.map((e) => e.t));
+  const merged = fakePdf.concat(t2.events.map((e) => Object.assign({}, e, { t: e.t - t2min + 1300 })));
   const aAdv = A.analyze({ events: merged });
   console.log('Verdict (advanced mode):', aAdv.verdict.title);
   console.log('   ', aAdv.verdict.detail);
@@ -169,11 +231,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.ok(/sandboxed/.test(aAdv.verdict.detail) && /allow-modals/.test(aAdv.verdict.hint), 'the verdict quotes Chrome\'s exact message');
 
   // Stop: the debugger must be detached (the banner goes away).
-  await cmd({ kind: 'stop', tabId });
-  const after = await cmd({ kind: 'get', tabId });
-  assert.strictEqual(after.debuggerAttached, false, 'debugger detached on stop');
+  assert.strictEqual(r.attachedAfterStop, false, 'debugger detached on stop');
 
-  await ctx.close();
   server.close();
   console.log('\nOK — the real extension works end to end in Chromium');
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -605,8 +605,12 @@
       };
     }
     const cand = candidates.find((c) => c.id === opts.candidateId) || candidates[candidates.length - 1];
-    const next = candidates.slice(candidates.indexOf(cand) + 1).find((c) => c.t > cand.t);
-    const steps = buildSteps(tr, evs, cand, next ? next.t - 200 : Infinity);
+    // The analysis window ends where the next attempt starts. A request sent by a Worker runs in
+    // parallel with the page's chain, so it never closes the window of a page request (and vice versa).
+    // The margin before the next attempt never exceeds half the gap, so the window can't end before it starts.
+    const next = candidates.slice(candidates.indexOf(cand) + 1).find((c) => c.t > cand.t && !!c.worker === !!cand.worker);
+    const tEnd = next ? next.t - Math.min(200, (next.t - cand.t) / 2) : Infinity;
+    const steps = buildSteps(tr, evs, cand, tEnd);
     return {
       candidates: candidates.map((c) => ({ id: c.id, label: c.label, t: c.t })),
       candidate: { id: cand.id, label: cand.label, url: cand.url, t: cand.t, kind: cand.kind },

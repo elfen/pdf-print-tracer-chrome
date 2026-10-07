@@ -263,4 +263,26 @@ const cd = (t, type, data) => E(t, 'cdp', type, data);
   assert.ok(/userGesture = false/.test(a.verdict.detail));
 }
 
+// 24. another PDF request follows very quickly (< 200 ms): the window of the first one must not be empty
+{
+  const evs = happy().concat([
+    wr(1300, 'wr:before', { requestId: '9', url: 'https://app.test/api/other.pdf' }),
+    wr(1310, 'wr:completed', { requestId: '9', url: 'https://app.test/api/other.pdf', statusCode: 200 })
+  ]);
+  const a = A.analyze({ events: evs });
+  const first = A.analyze({ events: evs }, { candidateId: a.candidates[0].id });
+  assert.strictEqual(status(first, 'js-response'), 'ok');
+}
+
+// 25. a Service Worker request in parallel does not cut the page chain
+{
+  const evs = happy().concat([
+    wr(1200, 'wr:before', { requestId: '8', url: 'https://app.test/api/doc.pdf?from=sw' }, ),
+    wr(1250, 'wr:completed', { requestId: '8', url: 'https://app.test/api/doc.pdf?from=sw', statusCode: 200 })
+  ].map((e) => Object.assign(e, { worker: true })));
+  const a = A.analyze({ events: evs }, { candidateId: 'wr:1' });
+  assert.strictEqual(a.verdict.level, 'ok');
+  assert.strictEqual(status(a, 'print-call'), 'ok');
+}
+
 console.log('OK — all scenarios pass');
