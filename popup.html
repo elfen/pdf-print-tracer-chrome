@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PDF Print Tracer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="popup">
+  <h1><img src="icons/icon-32.png" width="22" height="22" alt="" class="logo"> PDF Print Tracer</h1>
+  <div id="status" class="status">…</div>
+  <div id="notice" class="banner" hidden></div>
+  <div class="bar">
+    <button id="toggle">Start recording</button>
+    <label class="small"><input type="checkbox" id="reload" checked> reload the page on start</label>
+  </div>
+  <div class="bar">
+    <button id="clear">Clear</button>
+    <button id="copy">Copy report</button>
+    <button id="export">Export JSON</button>
+    <button id="report">Compare traces…</button>
+    <label class="small"><input type="checkbox" id="redact" checked> mask URL parameters</label>
+  </div>
+  <div class="bar">
+    <label class="small"><input type="checkbox" id="adv"> <strong>Advanced mode</strong> (Chrome debugger: browser console messages, refused popups/print, blocked cookies, PDF viewer) — Chrome will show its "debugging this browser" banner</label>
+  </div>
+  <div class="bar" id="candbar" hidden>
+    <span class="small">PDF analysed:</span>
+    <select id="cands"></select>
+  </div>
+  <div id="out"></div>
+  <script src="analysis.js"></script>
+  <script src="render.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

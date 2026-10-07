@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PDF Print Tracer — trace comparison</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1><img src="icons/icon-48.png" width="28" height="28" alt="" class="logo"> Trace comparison</h1>
+  <p class="small">Load the trace exported from the machine where it works (A) and the one where it fails (B). Steps whose status differs are highlighted.</p>
+  <div class="cols">
+    <div class="file"><strong>A — machine that works</strong><br><input type="file" id="fileA" accept="application/json,.json"></div>
+    <div class="file"><strong>B — machine that fails</strong><br><input type="file" id="fileB" accept="application/json,.json"></div>
+  </div>
+  <div id="cmp"></div>
+  <div class="cols">
+    <div id="outA"></div>
+    <div id="outB"></div>
+  </div>
+  <script src="analysis.js"></script>
+  <script src="render.js"></script>
+  <script src="report.js"></script>
+</body>
+</html>

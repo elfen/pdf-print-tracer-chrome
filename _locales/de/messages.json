@@ -1,0 +1,4 @@
+{
+  "extName": { "message": "PDF Print Tracer" },
+  "extDescription": { "message": "Findet, warum ein PDF nicht druckt: verfolgt jeden Schritt von der HTTP-Antwort bis zum Druckdialog und zeigt, welcher blockiert." }
+}
