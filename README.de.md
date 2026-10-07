@@ -2,6 +2,15 @@
 
 # PDF Print Tracer
 
+[![Tests](https://github.com/elfen/pdf-print-tracer-chrome/actions/workflows/tests.yml/badge.svg)](https://github.com/elfen/pdf-print-tracer-chrome/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/github/license/elfen/pdf-print-tracer-chrome)](LICENSE)
+![Version](https://img.shields.io/github/manifest-json/v/elfen/pdf-print-tracer-chrome)
+![Manifest V3](https://img.shields.io/badge/Manifest-V3-4285F4?logo=googlechrome&logoColor=white)
+![Chrome 119+](https://img.shields.io/badge/Chrome-119%2B-4285F4?logo=googlechrome&logoColor=white)
+[![Privacy: no data collected](https://img.shields.io/badge/privacy-no%20data%20collected-2e7d32)](PRIVACY.md)
+![i18n: en | fr | es | de](https://img.shields.io/badge/i18n-en%20%7C%20fr%20%7C%20es%20%7C%20de-blue)
+![Last commit](https://img.shields.io/github/last-commit/elfen/pdf-print-tracer-chrome)
+
 [English](README.md) · [Français](README.fr.md) · [Español](README.es.md) · **Deutsch**
 
 **Findet heraus, warum ein PDF nicht gedruckt wird.** Eine Chrome-Erweiterung (Manifest V3), die jeden Schritt zwischen der HTTP-Antwort mit dem PDF und dem Moment, in dem der Druckdialog bereit ist, aufzeichnet und anzeigt, welcher Schritt fehlschlägt — oder nie erreicht wird.

@@ -1,0 +1,42 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax check
+        run: for f in *.js test/*.js; do node --check "$f"; done
+
+      - name: Manifest and locales are valid JSON
+        run: |
+          node -e "for (const f of ['manifest.json', ...require('fs').readdirSync('_locales').map(l => '_locales/' + l + '/messages.json')]) { JSON.parse(require('fs').readFileSync(f, 'utf8')); console.log('ok', f); }"
+
+      - name: Analysis tests
+        run: node test/test-analysis.js
+
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright
+          npx playwright install --with-deps chromium
+
+      - name: Page hook tests (Chromium)
+        run: node test/test-inject.js
+
+      - name: End-to-end tests (real extension in Chromium)
+        run: node test/test-e2e.js
